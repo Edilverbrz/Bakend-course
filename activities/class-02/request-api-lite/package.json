@@ -1,14 +1,16 @@
 {
-  "name": "request-api-lite",
+  "name": "class-02",
   "version": "1.0.0",
-  "private": true,
-  "description": "Small Express API that stores maintenance requests in memory",
-  "type": "module",
+  "description": "",
   "main": "server.js",
   "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
   },
+  "type": "module",
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "express": "^5.1.0"
+    "express": "^5.2.1"
   }
 }
