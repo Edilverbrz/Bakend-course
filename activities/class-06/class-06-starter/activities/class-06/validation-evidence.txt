@@ -1,0 +1,28 @@
+Pega aqui la salida final de: npm run validate:class-06
+(la salida no contiene secretos; no agregues capturas de tu .env)
+sitiouno@WKS4091MWQ:~/Escritorio/Bakend-course/activities/class-06/class-06-starter$ npm test
+
+> class-06-request-api@6.0.0 test
+> node --test --test-concurrency=1 'test/*.test.js'
+
+✔ registering a new account answers 201 with role requester (1051.294711ms)
+✔ registering the same email twice answers a generic 409 (413.138797ms)
+✔ sending a role at registration is rejected explicitly (6.652936ms)
+✔ logging in with valid credentials answers a Bearer token (428.389678ms)
+✔ logging in with a wrong password answers a generic 401 (404.955911ms)
+✔ GET /auth/me reports the identity carried by the token (435.010648ms)
+✔ GET /auth/me without a token answers 401 (6.485574ms)
+✔ a requester can create a request and becomes its owner (1433.661843ms)
+✔ the owner can read their own request (1003.042595ms)
+✔ a requester cannot access another user request (1169.628991ms)
+✔ the collection requires a Bearer token (6.344814ms)
+✔ a requester cannot change the priority, even of their own request (861.309713ms)
+✔ an agent can move a request through a valid transition (1371.678115ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9998.053353
