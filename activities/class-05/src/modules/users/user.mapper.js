@@ -1,6 +1,4 @@
 // ============================================================================
-// STARTER NOTE — Station 2.
-//
 // The single bridge between user rows and their HTTP representation.
 // Contract: mapUserRow(row) -> { id, email, role, createdAt }
 //
@@ -9,6 +7,10 @@
 // mapper never exposes.
 // ============================================================================
 export function mapUserRow(row) {
-  // TODO (station 2)
-  throw new Error('TODO: mapUserRow is not implemented yet.');
+  return {
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    createdAt: row.created_at
+  };
 }

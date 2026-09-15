@@ -4,84 +4,106 @@ Documenta ANTES de implementar. Para cada endpoint: método, ruta, ¿público o
 protegido?, body permitido, respuesta de éxito (código + forma) y CADA error
 (código HTTP + `error.code`).
 
+---
+
 ## POST /auth/register
-Acceso: Público.
-Body permitido: { "email": "usuario@ejemplo.com", "password": "123456" }.
-Respuesta de éxito (201 Created):
-{
-  "user": {
-    "id": "<userId>",
+
+- **Acceso:** público.
+- **Body permitido (allowlist estricta):** solo `email` y `password`.
+
+  ```json
+  { "email": "usuario@ejemplo.com", "password": "password de 15+ caracteres" }
+  ```
+
+- **Normalización:** `email` → `trim + lowercase` antes de almacenar.
+- **Password:** 15–128 caracteres (puntos de código; Unicode y espacios OK).
+
+- **Respuesta de éxito (201 Created):**
+
+  ```json
+  {
+    "id": "uuid-del-usuario",
     "email": "usuario@ejemplo.com",
     "role": "requester",
     "createdAt": "2026-09-08T12:00:00.000Z"
-  },
-  "accessToken": "<jwt>",
-  "expiresIn": 3600
-}
-Errores:
-400 Bad Request — VALIDATION_ERROR
-400 Bad Request — SERVER_CONTROLLED_FIELD
-409 Conflict — ACCOUNT_CANNOT_BE_CREATED
+  }
+  ```
+
+- **Errores:**
+  - `400` — `SERVER_CONTROLLED_FIELD` (rol, id, createdAt, updatedAt,
+    createdBy o passwordHash en el body)
+  - `400` — `INVALID_EMAIL`
+  - `400` — `INVALID_PASSWORD`
+  - `409` — `ACCOUNT_CANNOT_BE_CREATED` (email duplicado; genérico, no
+    confirma que la cuenta exista)
+
+---
 
 ## POST /auth/login
-Acceso: Público.
-Body permitido: { "email": "usuario@ejemplo.com", "password": "123456" }.
-Respuesta de éxito (200 OK):
-{
-  "user": {
-    "id": "<userId>",
-    "email": "usuario@ejemplo.com",
-    "role": "requester",
-    "createdAt": "2026-09-08T12:00:00.000Z"
-  },
-  "accessToken": "<jwt>",
-  "expiresIn": 3600
-}
-Errores:
-400 Bad Request — VALIDATION_ERROR
-401 Unauthorized — INVALID_CREDENTIALS
+
+- **Acceso:** público.
+- **Body permitido:** `email` y `password`.
+- **Respuesta de éxito (200 OK):** el token NUNCA se emite en el registro;
+  solo en el login.
+
+  ```json
+  {
+    "accessToken": "<jwt-firmado>",
+    "tokenType": "Bearer",
+    "expiresIn": 3600
+  }
+  ```
+
+- **Errores (todos idénticos, byte a byte):**
+  - `401` — `INVALID_CREDENTIALS` — "Email or password is incorrect."
+    - email inexistente y password incorrecta responden EXACTO igual:
+      no hay enumeración de cuentas.
+    - email no normalizado o campos faltantes también caen aquí.
+
+---
 
 ## GET /auth/me
-Acceso: Protegido.
-Body: sin cuerpo (no permitido).
-Respuesta de éxito (200 OK):
-{
-  "id": "<userId>",
-  "email": "usuario@ejemplo.com",
-  "role": "requester",
-  "createdAt": "2026-09-08T12:00:00.000Z"
-}
-Errores:
-401 Unauthorized — TOKEN_MISSING
-401 Unauthorized — TOKEN_EXPIRED
-401 Unauthorized — TOKEN_INVALID
-404 Not Found — USER_NOT_FOUND
 
-## Semántica de errores
+- **Acceso:** protegido (`Authorization: Bearer <token>`).
+- **Body:** sin cuerpo.
+- **Respuesta de éxito (200 OK):**
 
-¿Cuándo responde tu API `401`? ¿Cuándo `403`? ¿Cuándo `404` aunque el recurso
-exista? ¿Cuándo `409`? Escribe el criterio, no solo ejemplos.
+  ```json
+  {
+    "id": "uuid-del-usuario",
+    "email": "usuario@ejemplo.com",
+    "role": "requester"
+  }
+  ```
 
-401 NO AUTORIZADO
+- **Errores:**
+  - `401` — `AUTHENTICATION_REQUIRED` (sin header o esquema distinto de Bearer)
+  - `401` — `INVALID_TOKEN` (alterado, vencido, otra firma, otra aud/iss —
+    una sola respuesta, no dice cuál control falló)
+  - `404` — `USER_NOT_FOUND` (cuenta borrada tras emitir el token)
 
-GET /auth/me enviando la cabecera Authorization: Bearer token_vencido_o_malformado.
+---
 
-POST /auth/login con la contraseña incorrecta para el correo ingresado.
+## Semántica de errores (criterio, no ejemplos)
 
-403 PROIBIDO 
+¿Cuándo responde tu API `401`? ¿`403`? ¿`404` (aunque el recurso exista)?
+¿`409`?
 
-DELETE /requests/123 realizado por un usuario con rol "requester" en una ruta que exige rol "admin".
+- **`401`** — "No sé quién eres": no existe identidad confiable.
+  Sin token, esquema no-Bearer, token inválido o vencido → `AUTHENTICATION_REQUIRED`
+  o `INVALID_TOKEN`. Login fallido → `INVALID_CREDENTIALS`.
 
-GET /admin/dashboard intentado por cualquier usuario no autenticado como personal administrativo.
+- **`403`** — "Sé quién eres; esto no": actor identificado y operación
+  prohibida para su rol o su relación con el recurso.
+  Ej.: requester cambia prioridad → `FORBIDDEN`.
 
-404 Not Found (aunque el recurso exista)
+- **`404`** — "Para ti, no existe": recurso inexistente **o ajeno cuya
+  existencia no conviene revelar**. Misma respuesta exacta en ambos casos:
+  `REQUEST_NOT_FOUND`, idéntico para `/requests/999` y para la solicitud de Bob
+  vista por Alice. Es una **decisión de diseño** (no revelar existencia), no un
+  accidente.
 
-GET /requests/88 donde la solicitud #88 le pertenece al usuario usr_A, pero la consulta la hace el usuario usr_B.
-
-PATCH /requests/88 cuando el usuario usr_B intenta modificar el estado de un ticket que no creó ni tiene asignado.
-
-409 CREO CONFLICTO
-
-POST /auth/register enviando el body {"email": "existente@ejemplo.com", "password": "123"} cuando ese correo ya está registrado.
-
-POST /requests/123/claim cuando dos agentes intentan tomar la misma solicitud sin propietario simultáneamente y el sistema detecta colisión.
+- **`409`** — "Existe, pero choca": conflicto con el estado del recurso.
+  - email duplicado → `ACCOUNT_CANNOT_BE_CREATED`
+  - transición ilegal → `INVALID_STATUS_TRANSITION`
+  - estado terminal → `REQUEST_IN_TERMINAL_STATUS`

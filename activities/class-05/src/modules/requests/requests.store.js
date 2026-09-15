@@ -1,16 +1,6 @@
-// ============================================================================
-// STARTER NOTE — Station 6 evolves this file. It arrives exactly as your
-// class 04 delivery left it. Target changes:
-//
-//   * add created_by to the selected columns (migration 004 already ran);
-//   * findAll: accept filters.createdBy and add `created_by = $n` to the
-//     WHERE — the ownership scope lives in SQL, not in JavaScript;
-//   * insertRequest: receive createdBy and include it in the INSERT
-//     (the service passes the authenticated actor, never the body);
-//   * insertStatusHistory: receive changedBy as a new parameter and write
-//     the changed_by column (migration 005);
-//   * findHistory: also select changed_by.
-// ============================================================================
+// Data access for requests. Ownership scope lives in SQL, never in
+// JavaScript: a foreign row should not pass through this process just to
+// be discarded afterwards.
 
 import { pool } from '../../database/pool.js';
 
@@ -21,7 +11,8 @@ const REQUEST_COLUMNS = `
   priority,
   status,
   created_at,
-  updated_at
+  updated_at,
+  created_by
 `;
 
 export async function findAll(filters = {}, db = pool) {
@@ -37,6 +28,10 @@ export async function findAll(filters = {}, db = pool) {
   if (filters.priority) {
     values.push(filters.priority);
     conditions.push(`priority = $${values.length}`);
+  }
+  if (filters.createdBy) {
+    values.push(filters.createdBy);
+    conditions.push(`created_by = $${values.length}`);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -55,13 +50,15 @@ export async function findById(id, db = pool) {
   return result.rows[0] ?? null;
 }
 
-export async function insertRequest({ title, description, priority }, db = pool) {
+export async function insertRequest({ title, description, priority, createdBy }, db = pool) {
   // The database generates id, status default, and both timestamps.
+  // Ownership is a column like any other: the service passes the
+  // authenticated actor, never the request body.
   const result = await db.query(
-    `INSERT INTO requests (title, description, priority)
-     VALUES ($1, $2, $3)
+    `INSERT INTO requests (title, description, priority, created_by)
+     VALUES ($1, $2, $3, $4)
      RETURNING ${REQUEST_COLUMNS}`,
-    [title, description, priority]
+    [title, description, priority, createdBy]
   );
   return result.rows[0];
 }
@@ -88,17 +85,19 @@ export async function updateRequest(id, changes, db = pool) {
   return result.rows[0] ?? null;
 }
 
-export async function insertStatusHistory(requestId, previousStatus, newStatus, db = pool) {
+export async function insertStatusHistory(requestId, previousStatus, newStatus, changedBy, db = pool) {
+  // Migration 005: every transition records WHO produced it. The value
+  // always comes from the authenticated actor, never from the body.
   await db.query(
-    `INSERT INTO request_status_history (request_id, previous_status, new_status)
-     VALUES ($1, $2, $3)`,
-    [requestId, previousStatus, newStatus]
+    `INSERT INTO request_status_history (request_id, previous_status, new_status, changed_by)
+     VALUES ($1, $2, $3, $4)`,
+    [requestId, previousStatus, newStatus, changedBy]
   );
 }
 
 export async function findHistory(requestId, db = pool) {
   const result = await db.query(
-    `SELECT previous_status, new_status, changed_at
+    `SELECT previous_status, new_status, changed_at, changed_by
      FROM request_status_history
      WHERE request_id = $1
      ORDER BY id`,

@@ -1,28 +1,22 @@
 // ============================================================================
-// STARTER NOTE — Stations 6 and 7 evolve this file. It arrives working
-// exactly as in class 04 (with AppError now imported from the shared
-// src/app-error.js). Target changes:
+// Use cases for requests. Station 6 establishes actor-first signatures;
+// station 7 applies pure policies before any write.
 //
-//   * every exported operation receives the actor first:
-//       listRequests(actor, filters) · getRequest(actor, id)
-//       createRequest(actor, input) · patchRequest(actor, id, body)
-//       getHistory(actor, id)
-//   * reject server-controlled fields explicitly (400 SERVER_CONTROLLED_FIELD):
-//       id, createdBy, createdAt, updatedAt, changedBy — and status on POST;
-//   * createRequest: createdBy = actor.userId (never from the body); the
-//     birth history records the creator as changed_by;
-//   * listRequests: requester -> scope with { createdBy: actor.userId } in
-//     the store call; agent -> everything;
-//   * getRequest/getHistory: a foreign request answers the SAME 404 as a
-//     missing one (do not reveal existence);
-//   * patchRequest: apply the policy BEFORE writing, all-or-nothing (a
-//     mixed body with a forbidden field changes NOTHING -> 403), and pass
-//     actor.userId as changedBy to insertStatusHistory;
-//   * the class 3-4 rules stay: terminal states and transitions keep
-//     answering 409 — for every role.
+// New error category: AppError('forbidden', 'FORBIDDEN', ...) -> 403.
 //
-// New error categories available: AppError('forbidden', 'FORBIDDEN', ...)
-// -> 403. See src/app-error.js.
+// Patch contract (mixed bodies):
+//   If the body mixes an allowed field (title) with a forbidden one
+//   (priority for a requester), the ENTIRE operation is rejected with 403
+//   and zero data is mutated. Partial updates are never silently applied.
+//
+// Create contract (server-controlled fields):
+//   id, createdBy, createdAt, updatedAt, changedBy, status -> 400
+//   SERVER_CONTROLLED_FIELD. A request is born open; status cannot be
+//   supplied at creation time.
+//
+// Visibility:
+//   A foreign request (or its history) returns the SAME 404 as a missing
+//   one. Revealing existence is a design choice documented in station 1.
 // ============================================================================
 
 import { withTransaction } from '../../database/transaction.js';
@@ -37,9 +31,16 @@ import {
 import { mapRequestRow, mapHistoryRow } from './request.mapper.js';
 import { STATUSES, isValidStatus, isTerminal, canTransition } from './request-status.js';
 import { AppError } from '../../app-error.js';
+import * as policy from './request.policy.js';
 
 const PRIORITIES = ['low', 'medium', 'high'];
 const UPDATABLE_FIELDS = ['title', 'description', 'priority', 'status'];
+
+// Fields the client may never set, regardless of operation.
+const SERVER_CONTROLLED_FIELDS = ['id', 'createdBy', 'createdAt', 'updatedAt', 'changedBy'];
+
+// Status at creation is also server-controlled (a request is born open).
+const CREATE_SERVER_CONTROLLED_FIELDS = [...SERVER_CONTROLLED_FIELDS, 'status'];
 
 function assertValidPriority(priority) {
   if (!PRIORITIES.includes(priority)) {
@@ -48,7 +49,20 @@ function assertValidPriority(priority) {
   }
 }
 
-export async function listRequests(filters) {
+function rejectServerControlledFields(input, fields) {
+  for (const field of fields) {
+    if (input && field in input) {
+      throw new AppError('contract', 'SERVER_CONTROLLED_FIELD',
+        `The field "${field}" is controlled by the server and cannot be provided.`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Read operations
+// ---------------------------------------------------------------------------
+
+export async function listRequests(actor, filters = {}) {
   if (filters.status !== undefined && !isValidStatus(filters.status)) {
     throw new AppError('contract', 'INVALID_FILTER',
       `Unknown status "${filters.status}". Valid values: ${STATUSES.join(', ')}.`);
@@ -57,23 +71,44 @@ export async function listRequests(filters) {
     throw new AppError('contract', 'INVALID_FILTER',
       `Unknown priority "${filters.priority}". Valid values: ${PRIORITIES.join(', ')}.`);
   }
-  const rows = await findAll(filters);
+
+  // Scope: requester sees only their own rows; agent sees the whole table.
+  // The filter lives in SQL — foreign rows never pass through this process.
+  const scope = {};
+  if (actor.role === 'requester') {
+    scope.createdBy = actor.userId;
+  }
+  const rows = await findAll({ ...filters, ...scope });
   return rows.map(mapRequestRow);
 }
 
-export async function getRequest(id) {
+export async function getRequest(actor, id) {
   const row = await findById(id);
-  if (!row) {
+  if (!row || !policy.canViewRequest(actor, row)) {
+    // Same code and message for missing and foreign: existence must not
+    // be revealed. Station 1 documents the reason.
     throw new AppError('resource', 'REQUEST_NOT_FOUND', `Request ${id} does not exist.`);
   }
   return mapRequestRow(row);
 }
 
-export async function createRequest(input) {
+// ---------------------------------------------------------------------------
+// Create
+// ---------------------------------------------------------------------------
+
+export async function createRequest(actor, input) {
+  rejectServerControlledFields(input, CREATE_SERVER_CONTROLLED_FIELDS);
+
+  if (!policy.canCreateRequest(actor)) {
+    throw new AppError('forbidden', 'FORBIDDEN',
+      'Agents do not create requests; they address them.');
+  }
+
   const { title, description, priority } = input ?? {};
 
   if (typeof title !== 'string' || title.trim() === '') {
-    throw new AppError('contract', 'TITLE_REQUIRED', 'A request needs a non-empty title.');
+    throw new AppError('contract', 'TITLE_REQUIRED',
+      'A request needs a non-empty title.');
   }
   if (priority !== undefined) assertValidPriority(priority);
 
@@ -83,16 +118,28 @@ export async function createRequest(input) {
     const created = await insertRequest({
       title: title.trim(),
       description: typeof description === 'string' ? description : null,
-      priority: priority ?? 'medium'
+      priority: priority ?? 'medium',
+      createdBy: actor.userId
     }, client);
-    await insertStatusHistory(created.id, null, created.status, client);
+
+    // The birth history records the authenticated creator as changed_by.
+    await insertStatusHistory(created.id, null, created.status, actor.userId, client);
+
     return created;
   });
 
   return mapRequestRow(row);
 }
 
-export async function patchRequest(id, body) {
+// ---------------------------------------------------------------------------
+// Patch
+// ---------------------------------------------------------------------------
+
+export async function patchRequest(actor, id, body) {
+  // Server-controlled fields on PATCH: createdBy, id, etc. Status is
+  // allowed (agents manage workflow) — unlike on POST.
+  rejectServerControlledFields(body, SERVER_CONTROLLED_FIELDS);
+
   const changes = {};
   for (const field of UPDATABLE_FIELDS) {
     if (body?.[field] !== undefined) changes[field] = body[field];
@@ -102,6 +149,7 @@ export async function patchRequest(id, body) {
     throw new AppError('contract', 'NO_UPDATABLE_FIELDS',
       `The body must include at least one of: ${UPDATABLE_FIELDS.join(', ')}.`);
   }
+
   if (changes.title !== undefined && (typeof changes.title !== 'string' || changes.title.trim() === '')) {
     throw new AppError('contract', 'TITLE_REQUIRED', 'The title cannot be empty.');
   }
@@ -112,14 +160,30 @@ export async function patchRequest(id, body) {
   }
   if (changes.title !== undefined) changes.title = changes.title.trim();
 
-  // Read, validate against the current state, write and record history —
-  // all with the same client, as one unit of work.
+  // Read, authorize, write and record history — all with the same client,
+  // as one atomic unit of work.
   const row = await withTransaction(async (client) => {
     const current = await findById(id, client);
-    if (!current) {
+    if (!current || !policy.canViewRequest(actor, current)) {
       throw new AppError('resource', 'REQUEST_NOT_FOUND', `Request ${id} does not exist.`);
     }
 
+    // All-or-nothing authorization: evaluate every present field before
+    // writing anything. A mixed body (allowed + forbidden) changes nothing.
+    const wantsContent = changes.title !== undefined || changes.description !== undefined;
+    const wantsPriority = changes.priority !== undefined;
+    const wantsStatus = changes.status !== undefined;
+
+    if (
+      (wantsContent && !policy.canEditContent(actor, current))
+      || (wantsPriority && !policy.canChangePriority(actor))
+      || (wantsStatus && !policy.canChangeStatus(actor))
+    ) {
+      throw new AppError('forbidden', 'FORBIDDEN',
+        'You are not allowed to perform this change.');
+    }
+
+    // Domain rules (class 3-4) bind EVERY role — agent included.
     if (isTerminal(current.status)) {
       throw new AppError('domain', 'REQUEST_IN_TERMINAL_STATUS',
         `Request ${id} is ${current.status} and can no longer be modified.`);
@@ -132,18 +196,24 @@ export async function patchRequest(id, body) {
     }
 
     const updated = await updateRequest(id, changes, client);
+
     if (statusChanges) {
-      await insertStatusHistory(id, current.status, changes.status, client);
+      await insertStatusHistory(id, current.status, changes.status, actor.userId, client);
     }
+
     return updated;
   });
 
   return mapRequestRow(row);
 }
 
-export async function getHistory(id) {
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
+export async function getHistory(actor, id) {
   const request = await findById(id);
-  if (!request) {
+  if (!request || !policy.canViewHistory(actor, request)) {
     throw new AppError('resource', 'REQUEST_NOT_FOUND', `Request ${id} does not exist.`);
   }
   const rows = await findHistory(id);
