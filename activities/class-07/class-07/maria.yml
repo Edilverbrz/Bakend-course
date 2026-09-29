@@ -1,0 +1,24 @@
+info:
+  name: maria
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: http://localhost:3000/auth/login
+  body:
+    type: json
+    data: |-
+      {
+        "email": "maria.agent.seed@example.test",
+        "password": "maria clave del taller 06"
+      }
+  auth:
+    type: bearer
+    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYWdlbnQiLCJzdWIiOiJhMDE1ZTg1ZS1jYzc1LTQ1OWUtYTdkMy03ZTBmMWQxYjA4YzMiLCJpYXQiOjE3OTA2ODYwNTEsImV4cCI6MTc5MDY4OTY1MSwiaXNzIjoiYmFja2VuZC1jb3Vyc2UtYXBpIiwiYXVkIjoiYmFja2VuZC1jb3Vyc2UtY2xpZW50In0.mOs1D6hdeZ2YYTR0C3P4SS-g5hDi5tXQ-Ng7s5a_AOc
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
