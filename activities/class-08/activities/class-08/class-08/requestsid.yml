@@ -1,0 +1,16 @@
+info:
+  name: requestsid
+  type: http
+
+http:
+  method: GET
+  url: http://localhost:3000/requests/
+  auth:
+    type: bearer
+    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicmVxdWVzdGVyIiwic3ViIjoiOTFlN2I3NTUtMmQ2Yi00MDEwLTk4YTQtNGM2MDdiMTZhNmQwIiwiaWF0IjoxNzkxMzAzNjA2LCJleHAiOjE3OTEzMDcyMDYsImlzcyI6ImJhY2tlbmQtY291cnNlLWFwaSIsImF1ZCI6ImJhY2tlbmQtY291cnNlLWNsaWVudCJ9.2Y8r1RrSqu6dI3hliKxXVbzSanlmuSz_bAvda5RhZcI
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
