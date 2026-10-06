@@ -10,9 +10,9 @@ todas las repreguntas y los cuatro bloques del cierre. Sin editar.
 
 ## Metadata de mi examen
 
-* studentId: [COMPLETAR]
-* Modelo utilizado: [COMPLETAR]
-* Fecha: [COMPLETAR]
+* studentId: [edilverbrizon.itsu@gmail.com]
+* Modelo utilizado: [gemini]
+* Fecha: [29/09/2026]
 * ¿Formato inválido y reparado una vez?: [no / sí / MODEL_FORMAT_FAILURE]
 
 ## TRANSCRIPT COMPLETO (desde COMENZAR hasta el BLOQUE 4)
@@ -33,3 +33,5 @@ un resultado sin sus respuestas no es verificable.]
    difieren y qué te dice esa diferencia?
 
 [COMPLETAR]
+
+
